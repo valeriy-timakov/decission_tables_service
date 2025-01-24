@@ -10,53 +10,35 @@ fn main() {
     call_do_something(d);
 }
 
-fn call_do_something<T: B>(t: T) {
-    t.do_something();
+trait Condition<T: PartialEq + PartialOrd> {
+    fn check(&self, value1: &T, value2: &T) -> bool;
 }
 
-trait A {
-    fn create() -> Self where Self: Sized;
-}
+struct EqualCondition {}
 
-trait B : A {
-    fn new() -> Self where Self: Sized {
-        let res = Self::create();
-        res.do_something();
-        res
-    }
-    fn do_something(&self){
-        println!("B");
+impl<T: PartialEq + PartialOrd> Condition<T> for EqualCondition {
+    fn check(&self, value1: &T, value2: &T) -> bool {
+        value1 == value2
     }
 }
 
-struct C {}
+struct MoreThanCondition {}
 
-impl C {
-}
-
-impl A for C {
-    fn create() -> Self {
-        C {}
+impl<T: PartialEq + PartialOrd> Condition<T> for MoreThanCondition {
+    fn check(&self, value1: &T, value2: &T) -> bool {
+        value1 > value2
     }
 }
 
-impl B for C {
-    fn do_something(&self) {
-        println!("C");
-    }}
+struct Rule<T: PartialEq + PartialOrd> {
+    condition: Box<dyn Condition<T>>,
+    values: Box<[T]>,
+}
 
-struct D {}
-
-impl A for D {
-    fn create() -> Self {
-        D {}
+impl<T: PartialEq + PartialOrd> Rule<T> {
+    fn check(&self, index: usize, value: &T) -> bool {
+        self.condition.check(&self.values[index], &value)
     }
 }
 
-impl B for D {
-    fn do_something(&self) {
-        println!("D");
-    }}
-
-impl D {
-}
+struct DecisionTable
