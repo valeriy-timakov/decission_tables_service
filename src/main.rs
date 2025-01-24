@@ -2,12 +2,12 @@ extern crate core;
 
 fn main() {
     println!("Hello, world!");
-    let c = C::new();
-    let d = D::new();
-    c.do_something();
-    d.do_something();
-    call_do_something(c);
-    call_do_something(d);
+    // let c = C::new();
+    // let d = D::new();
+    // c.do_something();
+    // d.do_something();
+    // call_do_something(c);
+    // call_do_something(d);
 }
 
 trait Condition<T: PartialEq + PartialOrd> {
@@ -41,4 +41,4 @@ impl<T: PartialEq + PartialOrd> Rule<T> {
     }
 }
 
-struct DecisionTable
+struct DecisionTable {}
