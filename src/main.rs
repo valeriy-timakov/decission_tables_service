@@ -19,10 +19,29 @@ fn main() {
     // Дістаємо значення "age"
     if let Some(age) = parsed["parameters"]["age"].as_i64() {
         println!("Age: {}", age);
+
+        let equal_rule = Rule {
+            condition: Box::new(EqualCondition {}),
+            values: vec![23, 25, 30, 35, 40].into_boxed_slice(),
+        };
+
+        let more_than_rule = Rule {
+            condition: Box::new(MoreThanCondition {}),
+            values: vec![18, 20, 22, 25, 30].into_boxed_slice(),
+        };
+
+        match equal_rule.checkAll(0, &parsed["parameters"]["age"]) {
+            Ok(indices) => println!("Equal rule matched at indices: {:?}", indices),
+            Err(e) => println!("Error: {}", e),
+        }
+
+        match more_than_rule.checkAll(0, &parsed["parameters"]["age"]) {
+            Ok(indices) => println!("More than rule matched at indices: {:?}", indices),
+            Err(e) => println!("Error: {}", e),
+        }
     } else {
         println!("Field 'age' not found or not an integer");
     }
-    
 }
 
 trait Condition<T: PartialEq + PartialOrd> {
@@ -50,15 +69,25 @@ struct Rule<T: PartialEq + PartialOrd> {
     values: Box<[T]>,
 }
 
+trait Parser<T: PartialEq + PartialOrd> {
+    fn parse(json: &JsonValue) -> Option<T>;
+}
+
+impl Parser<i64> for Rule<i64> {
+    fn parse(json: &JsonValue) -> Option<i64> {
+        json.as_i64()
+    }
+}
+
 impl<T: PartialEq + PartialOrd> Rule<T> {
     fn checkOne(&self, index: usize, value: &T) -> bool {
         self.condition.check(&self.values[index], &value)
     }
 }
 
-impl<'a, T: PartialEq + PartialOrd + TryFrom<JsonValue<'a>, Error = String>> Rule<T> {
+impl<'a, T: PartialEq + PartialOrd> Rule<T> {
     fn checkAll(&self, index: usize, value: &JsonValue<'a>) -> Result<Vec<usize>, String> {
-        let t_value = T::try_from(value.clone())?;
+        let t_value = parse(value.clone())?;
         let mut result: Vec<usize> = Vec::new();
         for (index, value) in self.values.iter().enumerate() {
             if self.checkOne(index, &t_value) {
@@ -69,6 +98,12 @@ impl<'a, T: PartialEq + PartialOrd + TryFrom<JsonValue<'a>, Error = String>> Rul
     }
 }
 
+impl<'a> TryFrom<JsonValue<'a>> for i64 {
+    type Error = &'static str;
 
+    fn try_from(value: JsonValue<'a>) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
 
 struct DecisionTable {}
