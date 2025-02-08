@@ -3,13 +3,14 @@ extern crate core;
 mod json_parseable;
 mod conditions;
 
+use std::borrow::Cow;
 use std::env::var;
 use std::fmt::format;
 use simd_json::borrowed::Value as JsonValue;
 use simd_json::prelude::ValueAsScalar;
 use json_parseable::JsonParseable;
 use conditions::{Condition, EqualCondition, GreaterThanCondition, GreaterThanOrEqualCondition, LessThanCondition, LessThanOrEqualCondition};
-use calamine::{Reader, open_workbook, Xlsx, DataType, Range};
+use calamine::{Reader, open_workbook, Xlsx, DataType, Range, Sheet};
 use std::path::Path;
 use std::f64;
 
@@ -251,8 +252,14 @@ impl DecisionTable {
     }
 }
 
+struct ParsePreferences {
+    decimal_separator: char,
+}
+
 struct XlsxDTDataSource {
     file_path: String,
+    parse_preferences: ParsePreferences, 
+    opened_sheet: Option<Range<DataType>>,
     rule_data: Option<RuleData>, 
 }
 
@@ -262,9 +269,11 @@ impl XlsxDTDataSource {
     const FIELD_TYPE_ROW: usize = 1;
     const FIELD_CONDITION_ROW: usize = 2;
     const DATA_ROWS_START: usize = 3;
-    pub fn new(file_path: String) -> Self {
+    pub fn new(file_path: String, parse_preferences: ParsePreferences) -> Self {
         XlsxDTDataSource { 
-            file_path,
+            file_path, 
+            parse_preferences,
+            opened_sheet: None, 
             rule_data: None,
         }
     }
@@ -280,7 +289,7 @@ impl XlsxDTDataSource {
             "String" => {
                 Ok(ValueType::String(StringData { max_length: 0, contains_utf: false }))
             },
-            "Number" => Ok(ValueType::Number(XlsxDTDataSource::look_for_number_type(sheet, col_num)?)),
+            "Number" => Ok(ValueType::Number(self.look_for_number_type(sheet, col_num)?)),
             "Boolean" => Ok(ValueType::Boolean),
             _ => Err(format!("Unknown type: {}", type_str))
         }
@@ -297,46 +306,131 @@ impl XlsxDTDataSource {
         }
     }
     
-    fn look_for_number_type(sheet: &Range<DataType>, col_num: usize) -> Result<NumberType, String> {
-        let mut max_value: Option<f64> = None;
+    fn look_for_string_data(&self, sheet: &Range<DataType>, col_num: usize) -> Result<StringData, String> {
+        let (height, width) = sheet.get_size();
+        if col_num >= width {
+            return Err(format!("Column number out of range: {} >= {}", col_num, width));
+        }
+        let mut max_length = 0;
+        let mut contains_utf = false;
+        for row_index in XlsxDTDataSource::DATA_ROWS_START..height {
+            if let Some(cell) = sheet.get((row_index, col_num)) {
+                if let DataType::String(s) = cell {
+                    max_length = max_length.max(s.len());
+                    if s.chars().any(|c| c as u32 > 127) {
+                        contains_utf = true;
+                    }
+                } else {
+                    return Err(format!("Wrong cell value for String: {}! In cell [{}, {}]",
+                                        cell, col_num, row_index));
+                }
+            } else {
+                return Err(format!("Empty cell in column {} at row {}", col_num, row_index));
+            }
+        }
+        Ok(StringData { max_length, contains_utf })
+    }
+    
+    fn look_for_number_type(&self, sheet: &Range<DataType>, col_num: usize) -> Result<NumberType, String> {
+        struct RuleRowsStatistics<'a> {
+            parse_preferences: &'a ParsePreferences, 
+            contains_decimal: bool,
+            contains_f64: bool,
+            contains_negative: bool,
+            max_value: i128,
+        }
+        
+        impl<'a> RuleRowsStatistics<'a> {
+            fn new(parse_preferences: &'a ParsePreferences) -> Self {
+                RuleRowsStatistics {
+                    parse_preferences, 
+                    contains_decimal: false,
+                    contains_f64: false,
+                    contains_negative: false,
+                    max_value: 0,
+                }
+            }
 
-        // Отримуємо розміри таблиці
+            fn check_int(&mut self, value_ref: &i64) {
+                let value = *value_ref;
+                if value < 0_i64 {
+                    self.contains_negative = true;
+                }
+                self.max_value = self.max_value.max(value as i128);
+            }
+
+            fn check_float(&mut self, value_ref: &f64) {
+                let value = *value_ref;
+                if value.fract() != 0.0 {
+                    self.contains_decimal = true;
+                    if !XlsxDTDataSource::can_fit_in_f32(value) {
+                        self.contains_f64 = true;
+                    }
+                } else {
+                    self.check_int(&(value as i64));
+                }
+            }
+
+            fn check_string(&mut self, s: &str) {
+
+                let s: Cow<str> = if self.parse_preferences.decimal_separator != '.' {
+                    Cow::Owned(s.replace(self.parse_preferences.decimal_separator, "."))
+                } else {
+                    Cow::Borrowed(s)
+                };
+
+                if let Ok(value) = s.parse::<i64>() {
+                    self.check_int(&value);
+                } else if let Ok(value) = s.parse::<f64>() {
+                    self.check_float(&value);
+                }
+            }
+        }
+        
         let (height, width) = sheet.get_size();
         
         if col_num >= width {
             return Err(format!("Column number out of range: {} >= {}", col_num, width));
         }
 
-        let mut contains_decimal = false;
-        let mut contains_f64 = false;
-        let mut contains_negative = false;
-        let mut max_value: i128 = 0;
+        let mut statistics = RuleRowsStatistics::new(&self.parse_preferences);
 
-        for row_index in 0..height {
-            if let Some(cell) = sheet.get((row_index, col_num)) {
-                // Check if the cell value is not a number and return an error
-                match cell {
-                    DataType::Int(value_ref) => {
-                        let value = *value_ref;
-                        if value < 0_i64 {
-                            contains_negative = true;
-                        }
-                        max_value = max_value.max(value as i128);
-                    },
-                    DataType::Float(value_reff) => {
-                        let value = *value_reff;
-                        if value.fract() == 0.0 {
-                            contains_decimal = true;
-                        }
-                    },
-                    DataType::String(s) => s.parse::<f64>().ok(),
-                    _ => None, // Non-numeric data types
-                };
-
+        for row_index in XlsxDTDataSource::DATA_ROWS_START..height {
+            match sheet.get((row_index, col_num)) {
+                Some(cell) => {
+                    // Check if the cell value is not a number and return an error
+                    match cell {
+                        DataType::Int(value_ref) => statistics.check_int(value_ref),
+                        DataType::Float(value_reff) => statistics.check_float(value_reff),
+                        DataType::String(s) => statistics.check_string(s),
+                        other => return Err(format!("Wrong cell value for Number: {}! In cell [{}, {}]",
+                                                    other, col_num, row_index))
+                    }
+                }, 
+                None => return Err(format!("Empty cell in column {} at row {}", col_num, row_index))
             }
         }
 
-        Ok(max_value)
+        let res = 
+            if statistics.contains_decimal {
+                if statistics.contains_f64 {
+                    NumberType::Decimal(DecimalType::F64)
+                } else {
+                    NumberType::Decimal(DecimalType::F32)
+                }
+            } else {
+                NumberType::Integer(IntegerData { 
+                    has_negative: statistics.contains_negative, 
+                    max_value: statistics.max_value 
+                })
+            };
+        Ok(res)
+    }
+    
+    fn can_fit_in_f32(x: f64) -> bool {
+        let x_f32 = x as f32;
+        let x_f64 = x_f32 as f64;
+        x == x_f64
     }
     
 
@@ -361,8 +455,12 @@ impl DecisionTableSource for XlsxDTDataSource {
         let sheet = workbook.worksheet_range_at(0)
             .ok_or("No worksheet found")?
             .map_err(|e| {format!("Failed to open workbook: {}", e)})?;
+        
+        self.opened_sheet = Some(sheet);
+        
+        let sheet = self.opened_sheet.as_ref().unwrap();
 
-        if sheet.height() < 4 {
+        if sheet.height() < XlsxDTDataSource::DATA_ROWS_START + 1 {
             return Err("Table must have at least 4 rows".to_string());
         }
 
@@ -395,10 +493,9 @@ impl DecisionTableSource for XlsxDTDataSource {
         let sheet = workbook.worksheet_range_at(0).unwrap().unwrap();
         
         let field_name = sheet.get((0, rule_num)).unwrap().to_string();
-        let type_str = sheet.get((1, rule_num)).unwrap().to_string();
         let condition_str = sheet.get((2, rule_num)).unwrap().to_string();
         
-        let field_type = self.parse_value_type(&type_str).unwrap();
+        let field_type = self.parse_value_type(&sheet, rule_num).unwrap();
         let condition = self.parse_value_condition(&condition_str).unwrap();
         
         Box::leak(Box::new(RuleData {
@@ -438,7 +535,37 @@ impl DecisionTableSource for XlsxDTDataSource {
             .collect()
     }
 
-    // ... (аналогічно для інших числових типів)
+    fn get_u32_rule_values(&self, rule_num: usize) -> Vec<Option<u32>> {
+        todo!()
+    }
+
+    fn get_u64_rule_values(&self, rule_num: usize) -> Vec<Option<u64>> {
+        todo!()
+    }
+
+    fn get_i8_rule_values(&self, rule_num: usize) -> Vec<Option<i8>> {
+        todo!()
+    }
+
+    fn get_i16_rule_values(&self, rule_num: usize) -> Vec<Option<i16>> {
+        todo!()
+    }
+
+    fn get_i32_rule_values(&self, rule_num: usize) -> Vec<Option<i32>> {
+        todo!()
+    }
+
+    fn get_i64_rule_values(&self, rule_num: usize) -> Vec<Option<i64>> {
+        todo!()
+    }
+
+    fn get_f32_rule_values(&self, rule_num: usize) -> Vec<Option<f32>> {
+        todo!()
+    }
+
+    fn get_f64_rule_values(&self, rule_num: usize) -> Vec<Option<f64>> {
+        todo!()
+    }
 
     fn get_string_rule_values(&self, rule_num: usize) -> Vec<Option<String>> {
         let mut workbook: Xlsx<_> = open_workbook(&self.file_path).unwrap();
