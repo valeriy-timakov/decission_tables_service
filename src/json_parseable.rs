@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use simd_json::borrowed::Value as JsonValue;
 use simd_json::prelude::ValueAsScalar;
 
@@ -91,4 +92,16 @@ impl JsonParseable<String> for String {
     fn parse(json: &JsonValue) -> Option<String> {
         json.as_str().map(String::from)
     }
-} 
+}
+
+// DateTime
+impl JsonParseable<DateTime<Utc>> for DateTime<Utc> {
+    fn parse(json: &JsonValue) -> Option<DateTime<Utc>> {
+        json.as_str().map(|s| {
+            DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%SZ")
+                .map(|x| x.with_timezone(&Utc))
+                .ok()
+        })
+        .flatten()
+    }
+}

@@ -4,6 +4,7 @@ mod json_parseable;
 mod conditions;
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::env::var;
 use std::fmt::format;
 use simd_json::borrowed::Value as JsonValue;
@@ -13,6 +14,8 @@ use conditions::{Condition, EqualCondition, GreaterThanCondition, GreaterThanOrE
 use calamine::{Reader, open_workbook, Xlsx, DataType, Range, Sheet};
 use std::path::Path;
 use std::f64;
+use std::iter::Map;
+use chrono::{DateTime, Utc};
 
 fn main() {
 
@@ -141,6 +144,7 @@ enum ValueCondition {
 enum ValueType {
     String(StringData),
     Number(NumberType),
+    DateTime,
     Boolean,
 }
 
@@ -152,10 +156,10 @@ struct RuleData {
 
 trait DecisionTableSource {
     fn init(&mut self) -> Result<(), String>;
-    fn get_rules_count(&self) -> usize;
-    fn get_variants_count(&self) -> usize;
-    fn get_rule_data(&self, rule_num: usize) -> &RuleData;
-    fn get_result_datas(&self) -> Vec<String>;
+    fn get_rules_count(&self) -> Result<usize, String>;
+    fn get_variants_count(&self) -> Result<usize, String>;
+    fn get_rule_data(&self, rule_num: usize) -> Result<&RuleData, String>;
+    fn get_result_datas(&self) -> Result<Vec<String>, String>;
     fn get_u8_rule_values(&self, rule_num: usize) -> Vec<Option<u8>>;
     fn get_u16_rule_values(&self, rule_num: usize) -> Vec<Option<u16>>;
     fn get_u32_rule_values(&self, rule_num: usize) -> Vec<Option<u32>>;
@@ -168,6 +172,8 @@ trait DecisionTableSource {
     fn get_f64_rule_values(&self, rule_num: usize) -> Vec<Option<f64>>;
     fn get_string_rule_values(&self, rule_num: usize) -> Vec<Option<String>>;
     fn get_bool_rule_values(&self, rule_num: usize) -> Vec<Option<bool>>;
+    
+    fn get_date_time_rule_values(&self, rule_num: usize) -> Vec<Option<DateTime<Utc>>>;
     // fn iterate_rules<F: FnMut(&dyn it)>(&self, callback: F);
     
 }
@@ -191,39 +197,40 @@ fn create_rule<T: PartialEq + PartialOrd>(rule_data: &RuleData, values: Vec<Opti
     Rule::new(rule_data.field_name.clone(), map_conditions(&rule_data.condition), values)
 }
 
-fn create_rule_for_type(data_source: &Box<dyn DecisionTableSource>, rule_num: usize) -> Box<dyn RuleTrait> {
-    let rule_data: &RuleData = data_source.get_rule_data(rule_num);
+fn create_rule_for_type(data_source: &Box<dyn DecisionTableSource>, rule_num: usize) -> Result<Box<dyn RuleTrait>, String> {
+    let rule_data: &RuleData = data_source.get_rule_data(rule_num)?;
     match &rule_data.field_type {  
-        ValueType::String(type_data) => Box::new(create_rule(rule_data, data_source.get_string_rule_values(rule_num))),
-        ValueType::Boolean => Box::new(create_rule(rule_data, data_source.get_bool_rule_values(rule_num))),
+        ValueType::String(type_data) => Ok(Box::new(create_rule(rule_data, data_source.get_string_rule_values(rule_num)))),
+        ValueType::Boolean => Ok(Box::new(create_rule(rule_data, data_source.get_bool_rule_values(rule_num)))),
+        ValueType::DateTime => Ok(Box::new(create_rule(rule_data, data_source.get_date_time_rule_values(rule_num)))),
         ValueType::Number(number_type) => {
             match number_type {
                 NumberType::Decimal(decimal_type) => {
                     match decimal_type {
-                        DecimalType::F64 => Box::new(create_rule(rule_data, data_source.get_f64_rule_values(rule_num))),
-                        DecimalType::F32 => Box::new(create_rule(rule_data, data_source.get_f32_rule_values(rule_num))),
+                        DecimalType::F64 => Ok(Box::new(create_rule(rule_data, data_source.get_f64_rule_values(rule_num)))),
+                        DecimalType::F32 => Ok(Box::new(create_rule(rule_data, data_source.get_f32_rule_values(rule_num)))),
                     }
                 },
                 NumberType::Integer(integer_data) => {
                     if integer_data.has_negative {
                         if integer_data.max_value <= i8::MAX as i128 {
-                            Box::new(create_rule(rule_data, data_source.get_i8_rule_values(rule_num)))
+                            Ok(Box::new(create_rule(rule_data, data_source.get_i8_rule_values(rule_num))))
                         } else if integer_data.max_value <= i16::MAX as i128 {
-                            Box::new(create_rule(rule_data, data_source.get_i16_rule_values(rule_num)))
+                            Ok(Box::new(create_rule(rule_data, data_source.get_i16_rule_values(rule_num))))
                         } else if integer_data.max_value <= i32::MAX as i128 {
-                            Box::new(create_rule(rule_data, data_source.get_i32_rule_values(rule_num)))
+                            Ok(Box::new(create_rule(rule_data, data_source.get_i32_rule_values(rule_num))))
                         } else {
-                            Box::new(create_rule(rule_data, data_source.get_i64_rule_values(rule_num)))
+                            Ok(Box::new(create_rule(rule_data, data_source.get_i64_rule_values(rule_num))))
                         }
                     } else {
                         if integer_data.max_value <= u8::MAX as i128 {
-                            Box::new(create_rule(rule_data, data_source.get_u8_rule_values(rule_num)))
+                            Ok(Box::new(create_rule(rule_data, data_source.get_u8_rule_values(rule_num))))
                         } else if integer_data.max_value <= u16::MAX as i128 {
-                            Box::new(create_rule(rule_data, data_source.get_u16_rule_values(rule_num)))
+                            Ok(Box::new(create_rule(rule_data, data_source.get_u16_rule_values(rule_num))))
                         } else if integer_data.max_value <= u32::MAX as i128 {
-                            Box::new(create_rule(rule_data, data_source.get_u32_rule_values(rule_num)))
+                            Ok(Box::new(create_rule(rule_data, data_source.get_u32_rule_values(rule_num))))
                         } else {
-                            Box::new(create_rule(rule_data, data_source.get_u64_rule_values(rule_num)))
+                            Ok(Box::new(create_rule(rule_data, data_source.get_u64_rule_values(rule_num))))
                         }
                     }
                 }
@@ -234,13 +241,13 @@ fn create_rule_for_type(data_source: &Box<dyn DecisionTableSource>, rule_num: us
 
 impl DecisionTable {
     fn create(mut data_source: Box<dyn DecisionTableSource>) -> Result<DecisionTable, String> {
-        let vaiants_count = data_source.get_rules_count();
-        let rules_count = data_source.get_rules_count();
+        let vaiants_count = data_source.get_rules_count()?;
+        let rules_count = data_source.get_rules_count()?;
         let mut rules: Vec<Box<dyn RuleTrait>> = Vec::new();
         for i in 0..rules_count {
-            rules.push( create_rule_for_type(&data_source, i) );
+            rules.push( create_rule_for_type(&data_source, i)? );
         }
-        let data = data_source.get_result_datas();
+        let data = data_source.get_result_datas()?;
         if vaiants_count != data.len() {
             return Err(format!("Error in DecisionTable data! Found {} variants count, where required {}", 
                                data.len(), vaiants_count));
@@ -254,13 +261,14 @@ impl DecisionTable {
 
 struct ParsePreferences {
     decimal_separator: char,
+    wildcard: DataType,
 }
 
 struct XlsxDTDataSource {
     file_path: String,
     parse_preferences: ParsePreferences, 
     opened_sheet: Option<Range<DataType>>,
-    rule_data: Option<RuleData>, 
+    rules_data: Option<HashMap<usize, RuleData>>, 
 }
 
 impl XlsxDTDataSource {
@@ -274,7 +282,7 @@ impl XlsxDTDataSource {
             file_path, 
             parse_preferences,
             opened_sheet: None, 
-            rule_data: None,
+            rules_data: None,
         }
     }
 
@@ -286,26 +294,31 @@ impl XlsxDTDataSource {
                 other => return Err(format!("Invalid type data in column {}! Found: {}", col_num, other))
             };
         match type_str {
-            "String" => {
-                Ok(ValueType::String(StringData { max_length: 0, contains_utf: false }))
-            },
+            "String" => Ok(ValueType::String(self.look_for_string_data(sheet, col_num)?)),
             "Number" => Ok(ValueType::Number(self.look_for_number_type(sheet, col_num)?)),
+            "DateTime" => Ok(ValueType::DateTime),
             "Boolean" => Ok(ValueType::Boolean),
             _ => Err(format!("Unknown type: {}", type_str))
         }
     }
 
-    fn parse_value_condition(&self, condition_str: &str) -> Result<ValueCondition, String> {
-        match condition_str {
-            "<" => Ok(ValueCondition::LessThan),
-            ">" => Ok(ValueCondition::GreaterThan),
-            "<=" => Ok(ValueCondition::LessOrEqual),
-            ">=" => Ok(ValueCondition::GreaterOrEqual),
-            "=" => Ok(ValueCondition::Equal),
-            _ => Err(format!("Unknown condition: {}", condition_str))
+    fn parse_value_condition(&self, sheet: &Range<DataType>, col_num: usize) -> Result<ValueCondition, String> {
+        let condition_str = sheet.get((XlsxDTDataSource::FIELD_CONDITION_ROW, col_num))
+            .ok_or(format!("No condition found for column {}", col_num))?;
+        if let DataType::String(s) = condition_str {
+            match s.as_str() {
+                "<" => Ok(ValueCondition::LessThan),
+                ">" => Ok(ValueCondition::GreaterThan),
+                "<=" => Ok(ValueCondition::LessOrEqual),
+                ">=" => Ok(ValueCondition::GreaterOrEqual),
+                "=" => Ok(ValueCondition::Equal),
+                _ => Err(format!("Unknown condition: {}", s))
+            }
+        } else {
+            Err(format!("Invalid condition data in column {}! Found: {}", col_num, condition_str))
         }
     }
-    
+
     fn look_for_string_data(&self, sheet: &Range<DataType>, col_num: usize) -> Result<StringData, String> {
         let (height, width) = sheet.get_size();
         if col_num >= width {
@@ -444,6 +457,21 @@ impl XlsxDTDataSource {
             _ => None,
         }
     }
+
+    fn get_result_datas<T, F: Fn(DataType) -> T>(&self, col_num: usize, mapper: F) -> Result<Vec<T>, String> {
+        let sheet = self.opened_sheet.as_ref()
+            .ok_or("Data source not inited!")?;
+
+        if col_num >= sheet.width() {
+            return Err(format!("Column number out of range: {} >= {}", col_num, sheet.width()));
+        }
+        
+        let res = (XlsxDTDataSource::DATA_ROWS_START..sheet.height())
+            .map(|row| sheet.get((row, col_num)).map(mapper)
+                .ok_or(format!("Failed to get cell [{}, {}]", row, col_num)))
+            .collect();
+        Ok(res)
+    }
 }
 
 impl DecisionTableSource for XlsxDTDataSource {
@@ -473,46 +501,60 @@ impl DecisionTableSource for XlsxDTDataSource {
             }
         }
 
+        let (height, width) = sheet.get_size();
+        let rows_count = height - XlsxDTDataSource::DATA_ROWS_START;
+        let rules_count = width - 1;
+
+        let mut rules_data: HashMap<usize, RuleData> = HashMap::new();
+        for i in 0..rules_count {
+            let field_name = match sheet.get((XlsxDTDataSource::FIELD_NAME_ROW, i)) {
+                Some(DataType::String(s)) => s.to_string(),
+                _ => return Err(format!("No field name found for column {}!", i))
+            };
+            let field_type = self.parse_value_type(&sheet, i)
+                .map_err(|e| format!("Failed to parse value type: {}", e))?;
+            let condition = self.parse_value_condition(&sheet, i)
+                .map_err(|e| format!("Failed to parse value condition: {}", e))?;
+            let rule_data = RuleData {
+                field_name,
+                condition,
+                field_type,
+            };
+            rules_data.insert(i, rule_data);
+        }
+        self.rules_data = Some(rules_data);
+
         Ok(())
     }
 
-    fn get_rules_count(&self) -> usize {
-        let mut workbook: Xlsx<_> = open_workbook(&self.file_path).unwrap();
-        let sheet = workbook.worksheet_range_at(0).unwrap().unwrap();
-        sheet.width() - 1 // Віднімаємо стовпець з результатами
+    fn get_rules_count(&self) -> Result<usize, String> {
+        self.rules_data.as_ref()
+            .map(|data| data.len())
+            .ok_or("Data source not inited!".to_string())
     }
 
-    fn get_variants_count(&self) -> usize {
-        let mut workbook: Xlsx<_> = open_workbook(&self.file_path).unwrap();
-        let sheet = workbook.worksheet_range_at(0).unwrap().unwrap();
-        sheet.height() - 3 // Віднімаємо заголовок, тип та умову
+    fn get_variants_count(&self) -> Result<usize, String> {
+        self.opened_sheet.as_ref()
+            .map(|sheet| sheet.height() - XlsxDTDataSource::DATA_ROWS_START)
+            .ok_or("Data source not inited!".to_string())
     }
 
-    fn get_rule_data(&self, rule_num: usize) -> &RuleData {
-        let mut workbook: Xlsx<_> = open_workbook(&self.file_path).unwrap();
-        let sheet = workbook.worksheet_range_at(0).unwrap().unwrap();
-        
-        let field_name = sheet.get((0, rule_num)).unwrap().to_string();
-        let condition_str = sheet.get((2, rule_num)).unwrap().to_string();
-        
-        let field_type = self.parse_value_type(&sheet, rule_num).unwrap();
-        let condition = self.parse_value_condition(&condition_str).unwrap();
-        
-        Box::leak(Box::new(RuleData {
-            field_name,
-            condition,
-            field_type,
-        }))
+    fn get_rule_data(&self, rule_num: usize) -> Result<&RuleData, String> {
+        self.rules_data.as_ref()
+            .ok_or("Data source not inited!".to_string())?
+            .get(&rule_num)
+            .ok_or(format!("No rule data found for rule number {}!", rule_num))
     }
 
-    fn get_result_datas(&self) -> Vec<String> {
-        let mut workbook: Xlsx<_> = open_workbook(&self.file_path).unwrap();
-        let sheet = workbook.worksheet_range_at(0).unwrap().unwrap();
+    fn get_result_datas(&self) -> Result<Vec<String>, String> {
+        let sheet = self.opened_sheet.as_ref()
+            .ok_or("Data source not inited!")?;
         
         let last_col = sheet.width() - 1;
-        (3..sheet.height())
+        let res = (XlsxDTDataSource::DATA_ROWS_START..sheet.height())
             .map(|row| sheet.get((row, last_col)).unwrap().to_string())
-            .collect()
+            .collect();
+        Ok(res)
     }
 
     // Реалізація для кожного типу даних
@@ -589,5 +631,9 @@ impl DecisionTableSource for XlsxDTDataSource {
         (3..sheet.height())
             .map(|row| self.parse_cell_value(sheet.get((row, rule_num)).unwrap()))
             .collect()
+    }
+
+    fn get_date_time_rule_values(&self, rule_num: usize) -> Vec<Option<DateTime<Utc>>> {
+        todo!()
     }
 }
