@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 simd-json = "0.14"
-calamine = "0.22"
+calamine = { version = "0.22", features = ["dates"] }
 chrono = "0.4"
