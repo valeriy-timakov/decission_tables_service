@@ -1,17 +1,12 @@
-
+use crate::decession_table::{DecimalType, DecisionTableSource, IntegerData, NumberType, RuleData, StringData, ValueCondition, ValueType};
+use calamine::{open_workbook, DataType, Range, Reader, Xlsx};
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
+use core::str::FromStr;
+use simd_json::prelude::ValueAsScalar;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::env::var;
-use std::fmt::format;
-use simd_json::borrowed::Value as JsonValue;
-use simd_json::prelude::ValueAsScalar;
-use calamine::{Reader, open_workbook, Xlsx, DataType, Range, Sheet};
-use std::path::Path;
 use std::f64;
-use crate::decession_table::{DecisionTableSource, RuleData, ValueType, ValueCondition, StringData, NumberType, DecimalType, IntegerData};
-use std::iter::Map;
-use chrono::{naive, DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
-use core::str::FromStr;
+use std::path::Path;
 
 pub struct ParsePreferences {
     decimal_separator: char,
@@ -114,7 +109,7 @@ impl XlsxDTDataSource {
 
     fn parse_time_zone(s: &str) -> Result<FixedOffset, String> {
         let (hours_str, minutes_str) = s.split_once(':')
-            .or_else(|| Some((s, ""))).unwrap();
+            .or_else(|| Some((s, "00"))).unwrap();
         let hours = hours_str.parse::<i32>()
             .map_err(|e| { format!("Error parsing timezone hours! Cause: {}", e) })?;
         let minutes = minutes_str.parse::<i32>()
@@ -132,14 +127,18 @@ impl XlsxDTDataSource {
         let mut contains_utf = false;
         for row_index in XlsxDTDataSource::DATA_ROWS_START..height {
             if let Some(cell) = sheet.get((row_index, col_num)) {
-                if let DataType::String(s) = cell {
-                    max_length = max_length.max(s.len());
-                    if s.chars().any(|c| c as u32 > 127) {
-                        contains_utf = true;
-                    }
-                } else {
-                    return Err(format!("Wrong cell value for String: {}! In cell [{}, {}]",
-                                       cell, col_num, row_index));
+                match cell { 
+                    DataType::String(s) => {
+                        max_length = max_length.max(s.len());
+                        if s.chars().any(|c| c as u32 > 127) {
+                            contains_utf = true;
+                        }                        
+                    },
+                    DataType::Empty => (),// Do nothing
+                    _ => {
+                        return Err(format!("Wrong cell value for String: {}! In cell [{}, {}]",
+                                           cell.to_string(), col_num, row_index));
+                    },
                 }
             } else {
                 return Err(format!("Empty cell in column {} at row {}", col_num, row_index));
@@ -369,6 +368,7 @@ impl DecisionTableSource for XlsxDTDataSource {
         self.get_result_datas(rule_num, |cell| {
             match cell {
                 DataType::String(s) => Ok(s.to_string()),
+                DataType::Empty => Ok("".to_string()),
                 _ => Err(format!("Invalid cell type: {:?}", cell))
             }
         })

@@ -1,106 +1,85 @@
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset};
 use simd_json::borrowed::Value as JsonValue;
 use simd_json::prelude::ValueAsScalar;
 
 pub trait JsonParseable<T: PartialEq + PartialOrd> {
-    fn parse(json: &JsonValue) -> Option<T>;
+    fn parse(json: &JsonValue) -> Result<T, String>;
 }
 
-impl JsonParseable<u8> for u8 {
-    fn parse(json: &JsonValue) -> Option<u8> {
-        json.as_u8()
-    }
+macro_rules! generate_json_parseable {   
+    ($prefix:ident, $size:expr) => {
+        paste::paste! {            
+            impl JsonParseable<[<$prefix $size>]> for [<$prefix $size>] {
+                #[inline (always)]
+                fn parse(json: &JsonValue) -> Result<[<$prefix $size>], String> {
+                    [<$prefix $size>]::try_from([<parse_ $prefix 64>](json)?).map_err(|e| e.to_string())
+                }
+            }
+        }
+    };
 }
 
-impl JsonParseable<u16> for u16 {
-    fn parse(json: &JsonValue) -> Option<u16> {
-        json.as_u16()
-    }
+macro_rules! generate_json_parser {
+    ($prefix:ident) => {
+        paste::paste! {
+            #[inline (always)]
+            fn [<parse_ $prefix 64>](json: &JsonValue) -> Result<[<$prefix 64>], String> {
+                json.[<as_ $prefix 64>]().ok_or(format!("Failed to get JSON as {}", stringify!([<$prefix 64>])))
+            }
+        }
+    };
 }
 
-impl JsonParseable<u32> for u32 {
-    fn parse(json: &JsonValue) -> Option<u32> {
-        json.as_u32()
-    }
-}
+generate_json_parser!(i);
+generate_json_parser!(u);
+generate_json_parser!(f);
 
-impl JsonParseable<u64> for u64 {
-    fn parse(json: &JsonValue) -> Option<u64> {
-        json.as_u64()
-    }
-}
+generate_json_parseable!(i, 8);
+generate_json_parseable!(i, 16);
+generate_json_parseable!(i, 32);
+generate_json_parseable!(i, 64);
 
-impl JsonParseable<u128> for u128 {
-    fn parse(json: &JsonValue) -> Option<u128> {
-        json.as_u64().map(|x| x as u128)
-    }
-}
+generate_json_parseable!(u, 8);
+generate_json_parseable!(u, 16);
+generate_json_parseable!(u, 32);
+generate_json_parseable!(u, 64);
 
-// Signed integers
-impl JsonParseable<i8> for i8 {
-    fn parse(json: &JsonValue) -> Option<i8> {
-        json.as_i64().and_then(|x| i8::try_from(x).ok())
-    }
-}
-
-impl JsonParseable<i16> for i16 {
-    fn parse(json: &JsonValue) -> Option<i16> {
-        json.as_i64().and_then(|x| i16::try_from(x).ok())
-    }
-}
-
-impl JsonParseable<i32> for i32 {
-    fn parse(json: &JsonValue) -> Option<i32> {
-        json.as_i32()
-    }
-}
-
-impl JsonParseable<i64> for i64 {
-    fn parse(json: &JsonValue) -> Option<i64> {
-        json.as_i64()
-    }
-}
-
-impl JsonParseable<i128> for i128 {
-    fn parse(json: &JsonValue) -> Option<i128> {
-        json.as_i64().map(|x| x as i128)
-    }
-}
 
 // Floating point
 impl JsonParseable<f32> for f32 {
-    fn parse(json: &JsonValue) -> Option<f32> {
-        json.as_f64().map(|x| x as f32)
+    #[inline (always)]
+    fn parse(json: &JsonValue) -> Result<f32, String> {
+        parse_f64(json).map(|x| x as f32)
     }
 }
 
 impl JsonParseable<f64> for f64 {
-    fn parse(json: &JsonValue) -> Option<f64> {
-        json.as_f64()
+    #[inline (always)]
+    fn parse(json: &JsonValue) -> Result<f64, String> {
+        parse_f64(json)
     }
 }
 
-// Boolean
+
+
 impl JsonParseable<bool> for bool {
-    fn parse(json: &JsonValue) -> Option<bool> {
-        json.as_bool()
+    fn parse(json: &JsonValue) -> Result<bool, String> {
+        json.as_bool().ok_or("Failed to get JSON as bool".to_string())
     }
 }
 
-// String
 impl JsonParseable<String> for String {
-    fn parse(json: &JsonValue) -> Option<String> {
-        json.as_str().map(String::from)
+    fn parse(json: &JsonValue) -> Result<String, String> {
+        json.as_str().map(String::from).ok_or("Failed to get JSON as String".to_string())
     }
+}
+impl JsonParseable<DateTime<FixedOffset>> for DateTime<FixedOffset> {
+    fn parse(json: &JsonValue) -> Result<DateTime<FixedOffset>, String> {
+        let res_str = json.as_str()
+            .ok_or("Failed to get JSON as String".to_string())?;
+        DateTime::parse_from_str(res_str, "%d.%m.%YT%H:%M:%S%:z")
+            .map_err(|e| e.to_string())
+    }
+
 }
 
-// DateTime
-impl JsonParseable<DateTime<FixedOffset>> for DateTime<FixedOffset> {
-    fn parse(json: &JsonValue) -> Option<DateTime<FixedOffset>> {
-        json.as_str().map(|s| {
-            DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%SZ")
-                .ok()
-        })
-        .flatten()
-    }
-}
