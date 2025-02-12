@@ -114,7 +114,7 @@ impl XlsxDTDataSource {
 
     fn parse_time_zone(s: &str) -> Result<FixedOffset, String> {
         let (hours_str, minutes_str) = s.split_once(':')
-            .or_else(|| Some((s, ""))).unwrap();
+            .or_else(|| Some((s, "00"))).unwrap();
         let hours = hours_str.parse::<i32>()
             .map_err(|e| { format!("Error parsing timezone hours! Cause: {}", e) })?;
         let minutes = minutes_str.parse::<i32>()
@@ -132,14 +132,18 @@ impl XlsxDTDataSource {
         let mut contains_utf = false;
         for row_index in XlsxDTDataSource::DATA_ROWS_START..height {
             if let Some(cell) = sheet.get((row_index, col_num)) {
-                if let DataType::String(s) = cell {
-                    max_length = max_length.max(s.len());
-                    if s.chars().any(|c| c as u32 > 127) {
-                        contains_utf = true;
-                    }
-                } else {
-                    return Err(format!("Wrong cell value for String: {}! In cell [{}, {}]",
-                                       cell, col_num, row_index));
+                match cell { 
+                    DataType::String(s) => {
+                        max_length = max_length.max(s.len());
+                        if s.chars().any(|c| c as u32 > 127) {
+                            contains_utf = true;
+                        }                        
+                    },
+                    DataType::Empty => (),// Do nothing
+                    _ => {
+                        return Err(format!("Wrong cell value for String: {}! In cell [{}, {}]",
+                                           cell.to_string(), col_num, row_index));
+                    },
                 }
             } else {
                 return Err(format!("Empty cell in column {} at row {}", col_num, row_index));
@@ -369,6 +373,7 @@ impl DecisionTableSource for XlsxDTDataSource {
         self.get_result_datas(rule_num, |cell| {
             match cell {
                 DataType::String(s) => Ok(s.to_string()),
+                DataType::Empty => Ok("".to_string()),
                 _ => Err(format!("Invalid cell type: {:?}", cell))
             }
         })

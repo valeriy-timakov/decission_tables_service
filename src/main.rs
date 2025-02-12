@@ -21,67 +21,22 @@ fn main() {
 
     let mut data = br#"{
         "parameters": {
-            "name": "someName",  
-            "age": 30      
+            "dateFrom": "06.11.2024",  
+            "value": 12,    
+            "label": ""
         }
     }"#.to_vec();
 
     // Парсимо JSON
     let mut parsed: JsonValue = simd_json::from_slice(&mut data).expect("Failed to parse JSON");
-
-    // Дістаємо значення "age"
-    if let Some(age) = parsed["parameters"]["age"].as_u8() {
-        println!("Age: {}", age);
         
-        let parse_preferences = ParsePreferences::new(
-            ',', DataType::String("*".to_string()), "%Y-%m-%dT%H:%M:%S".to_string());
-        let mut loader = XlsxDTDataSource::new(
-            "C:\\Users\\valti\\Downloads".to_string(), parse_preferences);
-        loader.init().unwrap();
-        
-        let dt = DecisionTable::create(Box::new(loader)).unwrap();
-
-        let equal_rule = 
-            Rule::new("age".to_string(), Box::new(EqualCondition {}), vec!(23_u8, 25, 30, 35, 40).iter().map(|x| Some(*x)).collect());
-
-        let more_than_rule = 
-            Rule::new("age".to_string(), Box::new(GreaterThanCondition {}), vec!(18_u8, 20, 22, 25, 30, 45, 90).iter().map(|x| Some(*x)).collect());
-
-        let greater_than_or_equal_rule = 
-            Rule::new("age".to_string(), Box::new(GreaterThanOrEqualCondition {}), vec!(18_u8, 25, 30).iter().map(|x| Some(*x)).collect());
-
-        let less_than_rule = 
-            Rule::new("age".to_string(), Box::new(LessThanCondition {}), vec!(40_u8, 50, 60).iter().map(|x| Some(*x)).collect());
-
-        let less_than_or_equal_rule = 
-            Rule::new("age".to_string(), Box::new(LessThanOrEqualCondition {}), vec!(30_u8, 35, 40).iter().map(|x| Some(*x)).collect());
-
-        let item = &parsed["parameters"];
-        match equal_rule.check_all(item) {
-            Some(indices) => println!("Equal rule matched at indices: {:?}", indices),
-            None => println!("Error parsing value: {}", item),
-        }
-
-        match greater_than_or_equal_rule.check_all(item) {
-            Some(indices) => println!("Greater than or equal rule matched at indices: {:?}", indices),
-            None => println!("Error parsing value: {}", item),
-        }
-
-        match less_than_rule.check_all(item) {
-            Some(indices) => println!("Less than rule matched at indices: {:?}", indices),
-            None => println!("Error parsing value: {}", item),
-        }
-
-        match less_than_or_equal_rule.check_all(item) {
-            Some(indices) => println!("Less than or equal rule matched at indices: {:?}", indices),
-            None => println!("Error parsing value: {}", item),
-        }
-
-        match more_than_rule.check_all(item) {
-            Some(indices) => println!("More than rule matched at indices: {:?}", indices),
-            None => println!("Error parsing value: {}", item),
-        }
-    } else {
-        println!("Field 'age' not found or not an integer");
-    }
+    let parse_preferences = ParsePreferences::new(
+        ',', DataType::String("*".to_string()), "%Y-%m-%dT%H:%M:%S".to_string());
+    let mut loader = XlsxDTDataSource::new(
+        "C:\\Users\\valti\\Downloads\\test_dt.xlsx".to_string(), parse_preferences);
+    loader.init().unwrap();
+    
+    let dt = DecisionTable::create(Box::new(loader)).unwrap();
+    
+    dt.check_all(&parsed).iter().for_each(|x| println!("Res: {}", x));
 }

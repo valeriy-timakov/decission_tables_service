@@ -1,12 +1,15 @@
+use std::collections::HashSet;
 use crate::conditions::{Condition, EqualCondition, GreaterThanCondition, GreaterThanOrEqualCondition, LessThanCondition, LessThanOrEqualCondition};
 use crate::json_parseable::JsonParseable;
 use chrono::{DateTime, FixedOffset, Utc};
 use simd_json::borrowed::Value as JsonValue;
+use simd_json::prelude::ValueObjectAccess;
 use std::f64;
-
+use std::fmt::format;
 
 pub trait RuleTrait {
-    fn check_all(&self, value: &JsonValue) -> Option<Vec<usize>>;
+    fn check_all(&self, value: &JsonValue) -> Result<Vec<usize>, String>;
+    fn check_indices(&self, value: &JsonValue, indices: Vec<usize>) -> Result<Vec<usize>, String>;
 }
 
 pub struct Rule<T: PartialEq + PartialOrd> {
@@ -22,21 +25,45 @@ impl<T: PartialEq + PartialOrd> Rule<T> {
 }
 
 impl<T: PartialEq + PartialOrd + JsonParseable<T>> RuleTrait for Rule<T> {
-    fn check_all(&self, value: &JsonValue) -> Option<Vec<usize>> {
-        let t_value: Option<T> = T::parse(&value[self.field_name.as_str()]);
-        t_value.map(|t_value| {
-            let mut result: Vec<usize> = Vec::new();
-            for (index, val_opt) in self.values.iter().enumerate() {
-                if
-                val_opt.as_ref()
-                    .map(|val| {self.condition.check(&t_value, val)})
-                    .unwrap_or(true)
-                {
-                    result.push(index);
-                }
+    fn check_all(&self, value: &JsonValue) -> Result<Vec<usize>, String> {
+        let t_value: T = value.get(self.field_name.as_str())
+            .ok_or(format!("Error in query data! Field not found: {}", value))
+            
+            .and_then(|x| T::parse(x)
+                .ok_or(format!("Error converting query field {} to {} rule type!", x, self.field_name))
+            )?;
+        let mut result: Vec<usize> = Vec::new();
+        for (index, val_opt) in self.values.iter().enumerate() {
+            if
+            val_opt.as_ref()
+                .map(|val| {self.condition.check(&t_value, val)})
+                .unwrap_or(true)
+            {
+                result.push(index);
             }
-            result
-        })
+        }
+        Ok(result)
+    }
+
+
+    fn check_indices(&self, value: &JsonValue, indices: Vec<usize>) -> Result<Vec<usize>, String> {
+        let t_value: T = value.get(self.field_name.as_str())
+            .ok_or(format!("Error in query data! Field not found: {}", value))
+
+            .and_then(|x| T::parse(x)
+                .ok_or(format!("Error converting query field {} to {} rule type!", x, self.field_name))
+            )?;
+        let mut result: Vec<usize> = Vec::new();
+        for (index, val_opt) in indices.iter().map(|i| self.values.get(*i)).enumerate() {
+            if
+            val_opt.as_ref()
+                .map(|val| {self.condition.check(&t_value, val)})
+                .unwrap_or(true)
+            {
+                result.push(index);
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -185,7 +212,7 @@ fn create_rule_for_type(data_source: &Box<dyn DecisionTableSource>, rule_num: us
 
 impl DecisionTable {
     pub fn create(mut data_source: Box<dyn DecisionTableSource>) -> Result<DecisionTable, String> {
-        let vaiants_count = data_source.get_rules_count()?;
+        let vaiants_count = data_source.get_variants_count()?;
         let rules_count = data_source.get_rules_count()?;
         let mut rules: Vec<Box<dyn RuleTrait>> = Vec::new();
         for i in 0..rules_count {
@@ -202,8 +229,27 @@ impl DecisionTable {
         })
     }
     
-    pub fn check_all(&self, value: &JsonValue) -> Vec<String> {
-        let mut result: Vec<String> = Vec::new();
+    pub fn check_all(&self, value: &JsonValue) -> Result<Vec<String>, String> {
+        let mut result: Vec<String> = Vec::new();        
+        let res_indices:HashSet<Result<&str, String>> = self.rules.iter().map(|rule| {
+            let rule_indices: HashSet<usize> = rule.check_all(value)?;
+                let s: HashSet<usize> = match rule.check_all(value) {
+                    Ok(indices) => indices.into_iter().collect(),
+                    None => HashSet::new(),
+                };
+                s
+            }).reduce(|a, b| 
+                a.intersection(&b)
+                    .map(|x| *x)
+                    .collect()
+            )
+            .unwrap_or(HashSet::new())
+            .iter()
+            .map(|x| self.data.get(*x)
+                .map(|s| s.as_str())
+                .ok_or("Error in DecisionTable data! Index out of bounds".to_string())
+            )
+            .collect();
         for rule in &self.rules {
             match rule.check_all(value) {
                 Some(indices) => {
