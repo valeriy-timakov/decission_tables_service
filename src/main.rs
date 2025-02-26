@@ -9,12 +9,14 @@ use std::time::Instant;
 
 
 fn main() {
-
     let mut data = br#"{
         "parameters": {
-            "dateFrom": "06.11.2024T12:25:42+02:00",  
-            "value": 12,    
-            "label": ""
+            "salesProgramCode": "00600004",  					
+            "acquisitionType": "NEW",    
+            "creditContractYear": "Default", 
+            "signatory": "AGENT", 
+            "signingOption": "ELECTRONIC", 
+            "salesman": "AGENT_NETWORK", 
         }
     }"#.to_vec();
 
@@ -27,7 +29,7 @@ fn main() {
     let parse_preferences = ParsePreferences::new(
         ',', DataType::String("*".to_string()), "%d.%m.%YT%H:%M:%S".to_string());
     let mut loader = XlsxDTDataSource::new(
-        "C:\\Users\\valti\\Downloads\\test_dt.xlsx".to_string(), parse_preferences);
+        "D:\\Downloads\\1\\EnterPrintouts_FullRights.xlsx".to_string(), parse_preferences);
     loader.init().unwrap();
     
     let dt = DecisionTable::create(Box::new(loader)).unwrap();

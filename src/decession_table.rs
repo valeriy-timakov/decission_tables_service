@@ -131,7 +131,7 @@ pub trait DecisionTableSource {
     fn get_rules_count(&self) -> Result<usize, String>;
     fn get_variants_count(&self) -> Result<usize, String>;
     fn get_rule_data(&self, rule_num: usize) -> Result<&RuleData, String>;
-    fn get_result_datas(&self) -> Result<Vec<String>, String>;
+    fn get_result_datas(&self) -> Result<Box<dyn OrderedSeq<String>>, String>;
     fn get_u8_rule_values(&self, rule_num: usize) -> Result<Vec<Option<u8>>, String>;
     fn get_u16_rule_values(&self, rule_num: usize) -> Result<Vec<Option<u16>>, String>;
     fn get_u32_rule_values(&self, rule_num: usize) -> Result<Vec<Option<u32>>, String>;
@@ -149,9 +149,55 @@ pub trait DecisionTableSource {
 
 }
 
+pub trait OrderedSeq<T> {
+    fn item(&self, index: usize) -> Option<&T>;
+    
+    fn len(&self) -> usize;
+}
+
+impl <T> OrderedSeq<T> for Vec<T> {
+
+    #[inline(always)]
+    fn item(&self, index: usize) -> Option<&T> {
+        self.get(index)
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.len()
+    }
+}
+
+pub struct CSVData {
+    names: Vec<String>,
+    data: Vec<Vec<String>>,
+}
+
+impl CSVData {
+    pub(crate) fn new(names: Vec<String>, data: Vec<Vec<String>>) -> CSVData {
+        CSVData {
+            names, 
+            data, 
+        }
+    }
+}
+
+impl OrderedSeq<String> for CSVData {
+    fn item(&self, index: usize) -> Option<&String> {
+        self.data.get(index).and_then(|x| {
+            
+            x.get(0)
+        })
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+}
+
 pub struct DecisionTable {
     rules: Vec<Box<dyn RuleTrait>>,
-    data: Vec<String>,
+    data: Box<dyn OrderedSeq<String>>,
     variants_count: usize,
 }
 
@@ -215,7 +261,7 @@ fn create_rule_for_type(data_source: &Box<dyn DecisionTableSource>, rule_num: us
     }
 }
 
-impl DecisionTable {
+impl <'a> DecisionTable {
     pub fn create(mut data_source: Box<dyn DecisionTableSource>) -> Result<DecisionTable, String> {
         let variants_count = data_source.get_variants_count()?;
         let rules_count = data_source.get_rules_count()?;
@@ -235,8 +281,8 @@ impl DecisionTable {
         })
     }
     
-    pub fn check_all(&self, value: &JsonValue) -> Result<Vec<String>, String> {
-        let mut result: Vec<String> = Vec::new();
+    pub fn check_all(&self, value: &JsonValue) -> Result<Vec<&str>, String> {
+        let mut result: Vec<&str> = Vec::new();
         let mut indices: Vec<usize> = (0..self.variants_count).collect();
         for rule in &self.rules {
             match rule.check_indices(value, &indices) {
@@ -247,7 +293,7 @@ impl DecisionTable {
             }
         } 
         for i in indices {
-            result.push(self.data[i].clone());
+            result.push(self.data.item(i).ok_or(format!("Error in DecisionTable data! Index out of bounds: {}", i))?);
         }
         Ok(result)
     }

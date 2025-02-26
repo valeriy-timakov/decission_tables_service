@@ -1,4 +1,4 @@
-use crate::decession_table::{DecimalType, DecisionTableSource, IntegerData, NumberType, RuleData, StringData, ValueCondition, ValueType};
+use crate::decession_table::{CSVData, DecimalType, DecisionTableSource, IntegerData, NumberType, OrderedSeq, RuleData, StringData, ValueCondition, ValueType};
 use calamine::{open_workbook, DataType, Range, Reader, Xlsx};
 use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone};
 use core::str::FromStr;
@@ -12,14 +12,16 @@ pub struct ParsePreferences {
     decimal_separator: char,
     wildcard: DataType,
     date_time_format: String,
+    first_output_column: Option<usize>,
 }
 
 impl ParsePreferences {
-    pub fn new(decimal_separator: char, wildcard: DataType, date_time_format: String) -> Self {
+    pub fn new(decimal_separator: char, wildcard: DataType, date_time_format: String, first_output_column: Option<usize>) -> Self {
         ParsePreferences {
             decimal_separator,
             wildcard,
             date_time_format,
+            first_output_column, 
         }
     }
 }
@@ -292,18 +294,29 @@ impl DecisionTableSource for XlsxDTDataSource {
             return Err("Table must have at least 4 rows".to_string());
         }
 
+        let (_, width) = sheet.get_size();
+        let rules_count = match self.parse_preferences.first_output_column {
+            None => { 
+                width - 1 
+            },   
+            Some(col_num) => {
+                if col_num >= width {
+                    return Err(format!("First output column number out of range: {} >= {}", col_num, width));
+                }
+                col_num - 1
+            }
+        };
         // Перевірка останнього стовпця на "out"
-        let field_names = sheet.rows().next()
-            .ok_or("Empty worksheet")?;
-        if let Some(last_field) = field_names.last() {
-            if last_field.to_string() != "out" {
-                return Err("'Return value' column must be named 'out'".to_string());
+        if self.parse_preferences.first_output_column.is_none() {
+            let field_names = sheet.rows().next()
+                .ok_or("Empty worksheet")?;
+            if let Some(last_field) = field_names.last() {
+                if last_field.to_string() != "out" {
+                    return Err("'Return value' column must be named 'out'".to_string());
+                }
             }
         }
 
-        let (height, width) = sheet.get_size();
-        let rows_count = height - XlsxDTDataSource::DATA_ROWS_START;
-        let rules_count = width - 1;
 
         let mut rules_data: HashMap<usize, RuleData> = HashMap::new();
         for i in 0..rules_count {
@@ -342,14 +355,36 @@ impl DecisionTableSource for XlsxDTDataSource {
             .ok_or(format!("No rule data found for rule number {}!", rule_num))
     }
 
-    fn get_result_datas(&self) -> Result<Vec<String>, String> {
-        let sheet = self.opened_sheet.as_ref()
-            .ok_or("Data source not inited!")?;
+    fn get_result_datas(&self) -> Result<Box<dyn OrderedSeq<String>>, String> {
+        let res: Box<dyn OrderedSeq<String>> = match self.parse_preferences.first_output_column {
+            None => {
+                let sheet = self.opened_sheet.as_ref()
+                    .ok_or("Data source not inited!")?;
 
-        let last_col = sheet.width() - 1;
-        let res = (XlsxDTDataSource::DATA_ROWS_START..sheet.height())
-            .map(|row| sheet.get((row, last_col)).unwrap().to_string())
-            .collect();
+                let last_col = sheet.width() - 1;
+                let data: Vec<String> = (XlsxDTDataSource::DATA_ROWS_START..sheet.height())
+                    .map(|row| sheet.get((row, last_col)).unwrap().to_string())
+                    .collect();
+                Box::new(data)
+            },
+            Some(col_num) => {
+                let sheet = self.opened_sheet.as_ref()
+                    .ok_or("Data source not inited!")?;
+                let field_names_raw = sheet.rows().next()
+                    .ok_or("Empty worksheet")?;
+                let field_names = field_names_raw[col_num..].iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>();
+                let data = sheet.rows().skip(XlsxDTDataSource::DATA_ROWS_START)
+                    .map(|row| {
+                        row.iter().skip(col_num)
+                            .map(|x| x.to_string())
+                            .collect::<Vec<String>>()
+                    })
+                    .collect();
+                Box::new(CSVData::new(field_names, data))
+            }
+        };
         Ok(res)
     }
 
