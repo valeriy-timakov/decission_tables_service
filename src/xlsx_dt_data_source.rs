@@ -303,7 +303,7 @@ impl DecisionTableSource for XlsxDTDataSource {
                 if col_num >= width {
                     return Err(format!("First output column number out of range: {} >= {}", col_num, width));
                 }
-                col_num - 1
+                col_num
             }
         };
         // Перевірка останнього стовпця на "out"

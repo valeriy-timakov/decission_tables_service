@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use crate::conditions::{Condition, EqualCondition, GreaterThanCondition, GreaterThanOrEqualCondition, LessThanCondition, LessThanOrEqualCondition};
 use crate::json_parseable::JsonParseable;
 use chrono::{DateTime, FixedOffset};
@@ -149,17 +150,17 @@ pub trait DecisionTableSource {
 
 }
 
-pub trait OrderedSeq<T> {
-    fn item(&self, index: usize) -> Option<&T>;
+pub trait OrderedSeq<T: Clone> {
+    fn item(&self, index: usize) -> Option<Cow<T>>;
     
     fn len(&self) -> usize;
 }
 
-impl <T> OrderedSeq<T> for Vec<T> {
+impl <T: Clone> OrderedSeq<T> for Vec<T> {
 
     #[inline(always)]
-    fn item(&self, index: usize) -> Option<&T> {
-        self.get(index)
+    fn item(&self, index: usize) -> Option<Cow<T>> {
+        self.get(index).map(|x| Cow::Borrowed(x))
     }
 
     #[inline(always)]
@@ -183,10 +184,22 @@ impl CSVData {
 }
 
 impl OrderedSeq<String> for CSVData {
-    fn item(&self, index: usize) -> Option<&String> {
+    fn item(&self, index: usize) -> Option<Cow<String>> {
         self.data.get(index).and_then(|x| {
-            
-            x.get(0)
+            let mut result = String::new();
+            result.push_str("{");
+            for (i, (name, value)) in self.names.iter().zip(x.iter()).enumerate() {
+                result.push_str("\"");
+                result.push_str(name);
+                result.push_str("\": \"");
+                result.push_str(value);
+                result.push_str("\"");
+                if i + 1 < self.names.len() {
+                    result.push_str(", ");
+                }
+            }
+            result.push_str("}");
+            Some(Cow::Owned(result))
         })
     }
 
@@ -281,8 +294,8 @@ impl <'a> DecisionTable {
         })
     }
     
-    pub fn check_all(&self, value: &JsonValue) -> Result<Vec<&str>, String> {
-        let mut result: Vec<&str> = Vec::new();
+    pub fn check_all(&self, value: &JsonValue) -> Result<Vec<Cow<String>>, String> {
+        let mut result: Vec<Cow<String>> = Vec::new();
         let mut indices: Vec<usize> = (0..self.variants_count).collect();
         for rule in &self.rules {
             match rule.check_indices(value, &indices) {
@@ -293,7 +306,8 @@ impl <'a> DecisionTable {
             }
         } 
         for i in indices {
-            result.push(self.data.item(i).ok_or(format!("Error in DecisionTable data! Index out of bounds: {}", i))?);
+            result.push(self.data.item(i)
+                .ok_or(format!("Error in DecisionTable data! Index out of bounds: {}", i))?);
         }
         Ok(result)
     }

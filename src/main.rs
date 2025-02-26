@@ -11,12 +11,12 @@ use std::time::Instant;
 fn main() {
     let mut data = br#"{
         "parameters": {
-            "salesProgramCode": "00600004",  					
+            "salesProgramCode": 600004,  					
             "acquisitionType": "NEW",    
             "creditContractYear": "Default", 
             "signatory": "AGENT", 
             "signingOption": "ELECTRONIC", 
-            "salesman": "AGENT_NETWORK", 
+            "salesman": "AGENT_NETWORK"
         }
     }"#.to_vec();
 
@@ -27,7 +27,7 @@ fn main() {
     let now = Instant::now();
         
     let parse_preferences = ParsePreferences::new(
-        ',', DataType::String("*".to_string()), "%d.%m.%YT%H:%M:%S".to_string());
+        ',', DataType::String("*".to_string()), "%d.%m.%YT%H:%M:%S".to_string(), Some(6));
     let mut loader = XlsxDTDataSource::new(
         "D:\\Downloads\\1\\EnterPrintouts_FullRights.xlsx".to_string(), parse_preferences);
     loader.init().unwrap();
