@@ -32,15 +32,15 @@ fn main() {
         "D:\\Downloads\\1\\EnterPrintouts_FullRights.xlsx".to_string(), parse_preferences);
     loader.init().unwrap();
     
-    let dt = DecisionTable::create(Box::new(loader)).unwrap();
+    let mut dt = DecisionTable::create(Box::new(loader)).unwrap();
 
 
     let nanos = now.elapsed().as_nanos(); // Час, що минув з моменту створення `now`
 
-    println!("Initializing, nanoseconds: {}", nanos);
+    println!("Parallel processing:{} ms", nanos as f32 * 1.0 / 1000000_f32);
 
     let now = Instant::now();
-    
+
     match dt.check_all(&parsed["parameters"]) {
         Ok(res) => {
             print!("Results: (");
@@ -54,5 +54,56 @@ fn main() {
 
     let nanos = now.elapsed().as_nanos(); // Час, що минув з моменту створення `now`
 
-    println!("Processing, nanoseconds: {}", nanos);
+    println!("Parallel processing:{} ms", nanos as f32 * 1.0 / 1000000_f32);
+
+    let now = Instant::now();
+
+    match dt.check_all_parallel(&parsed["parameters"]) {
+        Ok(res) => {
+            print!("Results: (");
+            res.iter().for_each(|x| print!("'{}', ", x));
+            println!(")");
+        },
+        Err(e) => {
+            println!("Error: {}", e);
+        }
+    }
+
+    let nanos = now.elapsed().as_nanos(); // Час, що минув з моменту створення `now`
+
+    println!("Parallel processing:{} ms", nanos as f32 * 1.0 / 1000000_f32);
+
+    let now = Instant::now();
+
+    match dt.check_all_cached(&parsed["parameters"]) {
+        Ok(res) => {
+            print!("Results: (");
+            res.iter().for_each(|x| print!("'{}', ", x));
+            println!(")");
+        },
+        Err(e) => {
+            println!("Error: {}", e);
+        }
+    }
+
+    let nanos = now.elapsed().as_nanos(); // Час, що минув з моменту створення `now`
+
+    println!("Parallel processing pass 1: {} ms", nanos as f32 * 1.0 / 1000000_f32);
+
+    let now = Instant::now();
+
+    match dt.check_all_cached(&parsed["parameters"]) {
+        Ok(res) => {
+            print!("Results: (");
+            res.iter().for_each(|x| print!("'{}', ", x));
+            println!(")");
+        },
+        Err(e) => {
+            println!("Error: {}", e);
+        }
+    }
+
+    let nanos = now.elapsed().as_nanos(); // Час, що минув з моменту створення `now`
+
+    println!("Parallel processing pass 2: {} ms", nanos as f32 * 1.0 / 1000000_f32);
 }

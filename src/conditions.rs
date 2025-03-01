@@ -1,4 +1,4 @@
-pub trait Condition<T> 
+pub trait Condition<T>: Send + Sync
 where 
     T: PartialEq + PartialOrd, 
 {
