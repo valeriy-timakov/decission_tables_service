@@ -1,6 +1,5 @@
 /target
+/.idea
 /Cargo.lock
-/.idea/decision_tables_service.iml
-/.idea/vcs.xml
-/.idea/workspace.xml
 /my_profile.etl
+/java_lib/target
